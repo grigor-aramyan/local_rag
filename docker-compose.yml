@@ -1,0 +1,16 @@
+services:
+  rag:
+    build: .
+    ports: ["8000:8000"]
+    volumes:
+      - lancedb:/data/lancedb
+      - ./documents:/data/documents:ro
+    environment:
+      LANCEDB_PATH: /data/lancedb
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      start_period: 30s
+volumes:
+  lancedb:

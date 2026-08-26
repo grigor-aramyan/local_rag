@@ -1,16 +1,35 @@
 services:
   rag:
-    build: .
+    build:
+      context: .
+      target: runtime
     ports: ["8000:8000"]
     volumes:
       - lancedb:/data/lancedb
-      - ./documents:/data/documents:ro
+      # Writable: /ingest stores uploaded documents here before indexing them.
+      - ./documents:/data/documents
     environment:
       LANCEDB_PATH: /data/lancedb
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      DOCUMENTS_PATH: /data/documents
+      JOBS_DB_PATH: /data/lancedb/jobs.db
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      start_period: 30s
+      # The slim image has no curl, and /health must confirm the models loaded.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+  tests:
+    profiles: ["dev"]
+    build:
+      context: .
+      target: dev
+    environment:
+      LANCEDB_PATH: /tmp/lancedb
+      DOCUMENTS_PATH: /tmp/documents
+
 volumes:
   lancedb:

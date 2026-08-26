@@ -1,0 +1,14 @@
+# Runtime dependencies. Pinned — an unpinned rebuild can change the embedder's
+# output and silently invalidate an existing index.
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
+pydantic==2.11.7
+pydantic-settings==2.10.1
+python-multipart==0.0.20
+
+# ONNX Runtime only. Never add torch (directly or transitively): it adds
+# 3-4 GB to a ~1 GB image target.
+fastembed==0.7.1
+
+lancedb==0.24.0
+anthropic==1.1.0

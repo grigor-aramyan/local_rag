@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Secrets — never commit; .env.example is the template
+.env
+
+# Uploaded corpus and local index data
+documents/*
+!documents/.gitkeep
+data/
+*.db

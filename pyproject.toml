@@ -1,0 +1,24 @@
+[project]
+name = "local-rag"
+version = "0.1.0"
+description = "Self-hosted RAG over a custom knowledge base."
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q --strict-markers"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S", "C4", "SIM", "RUF"]
+ignore = [
+    "B008",    # FastAPI dependencies are function calls in defaults by design
+    "RUF002",  # en dashes in prose docstrings are deliberate
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]  # assertions are the point

@@ -16,7 +16,9 @@ extra downloads or setup.
   add ~3–4 GB to the image
 - **Embedder:** small ONNX model (e.g. `bge-small-en-v1.5`)
 - **Reranker:** ONNX cross-encoder (e.g. `ms-marco-MiniLM-L-6-v2`)
-- **Generation:** external OpenAI-compatible API (configurable base URL)
+- **Generation:** Anthropic API (`claude-opus-5`) via the official `anthropic`
+  SDK. Only generation leaves the container — embedding and reranking stay
+  local, so the corpus itself is never sent anywhere.
 
 Target image size: ~1 GB.
 
@@ -65,10 +67,13 @@ assemble prompt → call LLM → stream response with citations.
    with overlap. Chunk IDs keyed on content hash so re-ingestion is
    idempotent.
 
-8. **Ingestion as background jobs.** `POST /ingest` returns a `job_id`
-   immediately; work runs in a `BackgroundTasks` task; `GET /jobs/{id}`
-   reports progress. Persist job state to SQLite on the same volume so a
-   restart doesn't strand jobs in `running`.
+8. **Ingestion as background jobs.** `POST /ingest` is a multipart upload — one
+   or more markdown/HTML/text files per request. Uploads are sanitized (the
+   client-supplied `filename` is untrusted), size-capped, and staged so a
+   rejected file never lands half-written; a re-uploaded name overwrites and
+   re-ingests. The endpoint returns a `job_id` immediately; work runs in a
+   `BackgroundTasks` task; `GET /jobs/{id}` reports progress. Persist job state
+   to SQLite on the same volume so a restart doesn't strand jobs in `running`.
 
 9. **Index management.** Create the FTS index at ingest time (retrofitting
    requires a full rebuild). Skip the ANN index below ~100k vectors — brute
@@ -78,8 +83,14 @@ assemble prompt → call LLM → stream response with citations.
 10. **Query pipeline.** Embed → hybrid retrieve `top_k≈50` → rerank to ~5 →
     build prompt with numbered context blocks → stream from the LLM.
 
-11. **Citations.** Prompt the model to emit `[n]` markers; map them back to
-    `source`/`page` in the response payload.
+11. **Citations.** Prefer the Anthropic API's native citations over prompting
+    for markers: set `citations: {enabled: true}` on each retrieved chunk passed
+    as a `document` content block, and the response comes back split into text
+    blocks carrying `cited_text` and a char/page location. That is grounded in
+    the actual spans rather than in the model's willingness to follow a format
+    instruction. Fall back to prompted `[n]` markers mapped to `source`/`page`
+    only if native citations prove awkward. Note: citations are incompatible
+    with `output_config.format` (structured outputs) — a 400.
 
 12. **Health and demo.** `/health` must verify models actually loaded, not
     just that the process is up. Ship `sample_docs/` plus a one-command demo

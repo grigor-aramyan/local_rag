@@ -13,7 +13,8 @@ Upload → sanitize/stage/commit → create job → return `job_id` with 202. Re
 as soon as the files are on disk; extraction and embedding are far too slow to
 hold a request open. The upload path is security-critical — read the untrusted
 input section in `app/CLAUDE.md` before touching it. Ingestion itself runs as a
-background task through `run_ingestion`.
+background task through `run_ingestion`; failures surface on `GET /jobs/{id}`,
+never on this response, which has already returned by then.
 
 ## GET /jobs/{id}
 
@@ -32,4 +33,12 @@ blocks → stream from Claude. Retrieval and generation details are in
 
 200 when the resources are ready, 503 degraded otherwise. It reads
 `Resources.ready`, so a partially constructed startup must surface here rather
-than failing on first query.
+than failing on first query. An index built under incompatible settings is
+degraded for the same reason — everything loaded, but a query would return
+quietly wrong results — and the reason comes back in `detail`.
+
+`/health` takes `ResourcesDep`, deliberately not `ReadyResourcesDep`: it has to
+be able to *describe* a degraded service rather than be blocked by it. Handlers
+that touch the index take `ReadyResourcesDep`, which 503s with the same message.
+`detail` is omitted when null (`response_model_exclude_none`), so a healthy
+response stays the four documented fields.

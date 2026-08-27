@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile, status
 
 from app.paths import PathTraversalError, UnsupportedFormatError
-from app.routes.deps import JobsDep, ResourcesDep, SettingsDep
+from app.routes.deps import JobsDep, ReadyResourcesDep, SettingsDep
 from app.schemas import IngestResponse, JobStatus
 from app.services.ingestion import run_ingestion
 from app.storage import UploadTooLargeError, save_uploads
@@ -16,7 +16,7 @@ router = APIRouter(tags=["ingest"])
 @router.post("/ingest", response_model=IngestResponse, status_code=status.HTTP_202_ACCEPTED)
 async def ingest(
     background: BackgroundTasks,
-    resources: ResourcesDep,
+    resources: ReadyResourcesDep,
     settings: SettingsDep,
     jobs: JobsDep,
     files: Annotated[list[UploadFile], File(description="Markdown, HTML, or text documents")],

@@ -46,9 +46,14 @@ class Settings(BaseSettings):
     embedding_dim: int = Field(default=384, gt=0)
     reranker_model: str = "Xenova/ms-marco-MiniLM-L-6-v2"
 
-    # Chunking
+    # Chunking. Sizes are in the embedder's own tokens, not words or characters,
+    # so chunk_size must stay under the model's context length (512 for bge-small)
+    # or every chunk loses its tail to truncation.
     chunk_size: int = Field(default=500, gt=0)
     chunk_overlap: int = Field(default=50, ge=0)
+    # Chunks per ONNX batch. Kept well under fastembed's default of 256: a batch
+    # of 500-token chunks is a lot of resident memory in a ~1 GB container.
+    embed_batch_size: int = Field(default=32, gt=0)
 
     # Retrieval
     top_k: int = Field(default=50, gt=0)

@@ -23,9 +23,16 @@ class Resources:
     reranker: Any | None = None
     db: Any | None = None
     jobs: JobStore | None = None
+    tokenizer: Any | None = None
+    # Set when the index on disk was built under incompatible settings. Held
+    # rather than raised so `/health` can explain the refusal instead of the
+    # container crash-looping with the reason buried in its logs.
+    config_error: str | None = None
 
     @property
     def ready(self) -> bool:
+        if self.config_error is not None:
+            return False
         return all(part is not None for part in (self.embedder, self.reranker, self.db))
 
 
@@ -61,4 +68,34 @@ def build_resources(settings: Settings) -> Resources:
         reranker=reranker,
         db=db,
         jobs=JobStore(settings.jobs_db_path),
+        tokenizer=tokenizer_for(embedder),
     )
+
+
+def tokenizer_for(embedder: Any) -> Any:
+    """Borrow the embedder's tokenizer for chunking, with truncation disabled.
+
+    Chunking has to measure text in the units the model actually consumes, so it
+    uses the model's own tokenizer rather than a word or character approximation
+    that would overshoot the 512-token limit and lose each chunk's tail.
+
+    Two traps, both silent: the tokenizer ships with truncation pinned at the
+    context length, so encoding a long document through it reports only the first
+    512 tokens and the rest of the file never gets chunked at all; and the object
+    is shared with the live ONNX session, so truncation is disabled on a copy
+    rather than in place. fastembed does not expose this — reaching through
+    `.model.tokenizer` is the only route, and a version bump can move it.
+    """
+    from tokenizers import Tokenizer
+
+    inner = getattr(getattr(embedder, "model", None), "tokenizer", None)
+    if inner is None:
+        raise RuntimeError(
+            "could not reach the embedder's tokenizer at `.model.tokenizer`; "
+            "fastembed's internals have moved and chunking cannot measure tokens"
+        )
+
+    copy = Tokenizer.from_str(inner.to_str())
+    copy.no_truncation()
+    copy.no_padding()
+    return copy

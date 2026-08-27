@@ -27,12 +27,19 @@ doesn't strand jobs. `fail_interrupted_jobs()` runs at startup and closes out
 anything left `pending` or `running`, since background tasks live in-process and
 none can legitimately survive a restart.
 
-## Config-compatibility guard (not built yet)
+## Config-compatibility guard
 
-Embedding model name, dimension, and chunking params go into a metadata row on
-first ingest and get verified at startup; divergence must refuse to serve with
-an explicit error. A changed embedder against an old index degrades retrieval
-silently rather than crashing.
+Embedding model, dimension, `chunk_size`, and `chunk_overlap` go into a
+`chunks__meta` row on first ingest (`app/services/vectorstore.py`). Checked in
+two places: `lifespan` verifies at startup, and `record_config` re-checks before
+every ingest so new vectors can't be written into a table an older embedder
+built. A changed embedder against an old index degrades retrieval silently
+rather than crashing, which is why divergence is refused loudly.
+
+Divergence degrades rather than crashes: `Resources.config_error` is set,
+`ready` goes false, `/health` returns 503 carrying the reason in `detail`, and
+`ReadyResourcesDep` fails `/ingest` with the same message. A crash loop would
+bury the explanation in restart logs; the operator needs to read it.
 
 ## Startup wiring
 

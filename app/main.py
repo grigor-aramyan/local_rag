@@ -9,6 +9,7 @@ from starlette.concurrency import run_in_threadpool
 from app.config import get_settings
 from app.routes import router
 from app.services.registry import Resources, build_resources
+from app.services.vectorstore import ConfigMismatchError, verify_config
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -27,6 +28,16 @@ async def lifespan(app: FastAPI):
 
     resources = await run_in_threadpool(build_resources, settings)
     app.state.resources = resources
+
+    # A changed embedder or chunk size against an existing index degrades
+    # retrieval silently. Refuse to serve, but stay up: the operator needs to read
+    # the reason from `/health`, not from a crash loop.
+    if resources.db is not None:
+        try:
+            await run_in_threadpool(verify_config, resources.db, settings)
+        except ConfigMismatchError as exc:
+            logger.error("refusing to serve: %s", exc)
+            resources.config_error = str(exc)
 
     if resources.jobs is not None:
         stranded = resources.jobs.fail_interrupted_jobs()

@@ -9,11 +9,10 @@ spec — read it before starting work; it holds the build order and an
 open-questions section whose answers are not recorded anywhere. If a decision
 from that section is needed, ask rather than assume.
 
-Built: config, upload handling, the SQLite job store, `/health`, and the route
-surface. Stubbed: `run_ingestion` in `app/services/ingestion.py` (build steps
-7–9) and `POST /query` (step 10, returns 501). An upload is stored and gets a
-job, but nothing is indexed yet — the job deliberately fails with a message
-saying so rather than pretending to succeed.
+Built: config, upload handling, the SQLite job store, `/health`, the route
+surface, the ingestion pipeline (steps 7–9), and the config-compatibility guard
+(step 6). Stubbed: `POST /query` (step 10, returns 501). An upload is stored,
+indexed, and searchable by both vector and FTS — but nothing queries it yet.
 
 ## Where the rest lives
 

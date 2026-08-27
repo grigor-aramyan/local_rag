@@ -13,6 +13,10 @@ class HealthResponse(BaseModel):
     embedder: bool
     reranker: bool
     database: bool
+    detail: str | None = Field(
+        default=None,
+        description="Why the service is degraded when nothing is simply unloaded.",
+    )
 
 
 class IngestResponse(BaseModel):

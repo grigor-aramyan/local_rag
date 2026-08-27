@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from app.services.registry import Resources, build_resources
+from app.services.registry import Resources, build_resources, tokenizer_for
 
 
 class TestResources:
@@ -29,7 +30,7 @@ class TestBuildResources:
     """
 
     @pytest.fixture
-    def spies(self, monkeypatch) -> dict[str, dict]:
+    def spies(self, monkeypatch, word_tokenizer) -> dict[str, dict]:
         import fastembed
         import fastembed.rerank.cross_encoder as cross_encoder
         import lancedb
@@ -39,7 +40,8 @@ class TestBuildResources:
         def record(name):
             def _spy(model_name=None, *args, **kwargs):
                 calls[name] = {"model": model_name, **kwargs}
-                return object()
+                # Mirrors fastembed's shape: chunking borrows `.model.tokenizer`.
+                return SimpleNamespace(model=SimpleNamespace(tokenizer=word_tokenizer))
 
             return _spy
 
@@ -73,3 +75,30 @@ class TestBuildResources:
         assert resources.ready
         assert resources.jobs is not None
         assert Path(settings.jobs_db_path).exists()
+
+    def test_a_chunking_tokenizer_is_prepared_at_startup(self, spies, settings) -> None:
+        """Copying the tokenizer per document would re-parse ~700 KB of JSON each time."""
+        assert build_resources(settings).tokenizer is not None
+
+
+class TestTokenizerFor:
+    """Chunking measures text in the embedder's tokens, so it borrows its tokenizer."""
+
+    def test_truncation_is_disabled_on_the_borrowed_copy(self, truncating_tokenizer) -> None:
+        """Left on, it would report only the first 512 tokens and chunk away the rest."""
+        embedder = SimpleNamespace(model=SimpleNamespace(tokenizer=truncating_tokenizer))
+
+        assert tokenizer_for(embedder).truncation is None
+
+    def test_the_embedders_own_tokenizer_is_not_mutated(self, truncating_tokenizer) -> None:
+        """The live ONNX session shares this object; it must keep truncating."""
+        embedder = SimpleNamespace(model=SimpleNamespace(tokenizer=truncating_tokenizer))
+
+        tokenizer_for(embedder)
+
+        assert truncating_tokenizer.truncation["max_length"] == 5
+
+    def test_a_moved_fastembed_internal_fails_loudly(self) -> None:
+        """`.model.tokenizer` is not public API, so a version bump can silently move it."""
+        with pytest.raises(RuntimeError, match="tokenizer"):
+            tokenizer_for(object())

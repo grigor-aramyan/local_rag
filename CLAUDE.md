@@ -15,6 +15,19 @@ surface. Stubbed: `run_ingestion` in `app/services/ingestion.py` (build steps
 job, but nothing is indexed yet — the job deliberately fails with a message
 saying so rather than pretending to succeed.
 
+## Where the rest lives
+
+Module-scoped guidance sits next to the code it governs; read the file for the
+area you are touching.
+
+- `app/CLAUDE.md` — untrusted uploads, `paths.py`, the config-compatibility
+  guard, jobs and storage
+- `app/routes/CLAUDE.md` — endpoint contracts for `/ingest`, `/query`, `/jobs`,
+  `/health`
+- `app/services/CLAUDE.md` — the fastembed traps, LanceDB schema and indexes,
+  the ingest and query pipelines, generation against the Anthropic API
+- `tests/CLAUDE.md` — tests as executable spec, the `make_client` factory
+
 ## Commands
 
 Everything runs in Docker; nothing is installed on the host.
@@ -59,83 +72,11 @@ the event loop stalls for every concurrent request.
 reranker, LanceDB handle, and `JobStore`; `lifespan` holds them on
 `app.state.resources`. The image bakes weights into `/models` with
 `HF_HUB_OFFLINE=1`, so any code path that triggers a runtime download hangs or
-fails in a container with no network.
-
-Three fastembed traps, all of which only surface when the container actually
-runs — the test suite passes regardless:
-
-1. `TextCrossEncoder` is **not** re-exported at the `fastembed` top level —
-   import it from `fastembed.rerank.cross_encoder`. Both the Dockerfile's
-   model-download stage and `registry.py` need the same import.
-2. fastembed ignores `HF_HOME` for its ONNX cache and uses
-   `FASTEMBED_CACHE_PATH` (default: a temp dir). If only `HF_HOME` is set, stage
-   1 writes the weights somewhere stage 2 never copies.
-3. Even with the cache present, fastembed's HuggingFace path *raises* under
-   `HF_HUB_OFFLINE=1` instead of falling back to it — `local_files_only=True`
-   is what makes it read the baked weights. `tests/test_registry.py` pins this.
+fails in a container with no network. The fastembed-specific traps behind this
+are in `app/services/CLAUDE.md`.
 
 **Docker layer order.** The model layer and `pip install` both precede any app
 code, or every source edit re-downloads several hundred MB of weights.
-
-**Config-compatibility guard (not built yet).** Embedding model name, dimension,
-and chunking params go into a metadata row on first ingest and get verified at
-startup; divergence must refuse to serve with an explicit error. A changed
-embedder against an old index degrades retrieval silently rather than crashing.
-
-## Uploads are untrusted input
-
-`POST /ingest` is a multipart upload, so the `filename` is attacker-controlled.
-`sanitize_upload_filename` strips POSIX *and* Windows separators, rejects null
-bytes, forces the result to a plain basename, strips leading dots, and gates on
-an extension allowlist; `resolve_within` is the containment backstop that also
-catches symlinks planted in the mount. Both are in `app/paths.py` and are the
-most heavily tested code here — extend the tests when touching them.
-
-The batch is all-or-nothing: files stream to `.staging-*` temp files beside
-their destination, counting bytes against `max_upload_bytes` as they arrive
-(never trusting Content-Length) and validating UTF-8 incrementally, then
-`os.replace` into place only once every file has passed. A rejected upload must
-never leave a partial file behind. Re-uploading a name overwrites and
-re-ingests — chunk IDs keyed on content hash are what make that idempotent.
-
-## Pipelines
-
-**Ingest** — upload → sanitize/stage/commit → create job → return `job_id`
-(202). Background task runs extract → chunk → embed → write → build FTS index →
-`table.optimize()`. `GET /jobs/{id}` reports progress. Job state persists to
-SQLite so a restart doesn't strand jobs; `fail_interrupted_jobs()` runs at
-startup and closes out anything left `pending` or `running`, since background
-tasks live in-process and none can legitimately survive a restart.
-
-**Query** — embed → hybrid retrieve (vector + FTS) `top_k≈50` → rerank to ~5 →
-numbered context blocks → stream from Claude.
-
-LanceDB table columns: `id`, `text`, `vector`, `source`, `page`, `content_hash`,
-`ingested_at`. Raw chunk text is stored, not just vectors — prompts and
-citations need it.
-
-**Indexes.** Create the FTS index at ingest time; retrofitting one requires a
-full rebuild. Skip the ANN index below ~100k vectors (brute force is faster
-there); create IVF-PQ above `ann_index_threshold`.
-
-## Generation
-
-Anthropic API via the official `anthropic` SDK (pinned 1.1.0, which is built on
-`httpx2`, not `httpx`). Default model `claude-opus-5`. Only generation leaves
-the container — embedding and reranking are local, so the corpus is never sent
-anywhere.
-
-Prefer the API's **native citations** over prompting for `[n]` markers: set
-`citations: {enabled: true}` on each retrieved chunk passed as a `document`
-content block and the response comes back split into text blocks carrying
-`cited_text` plus a char or page location — grounded in real spans rather than
-in the model's willingness to follow a format instruction. Note they are
-incompatible with `output_config.format`.
-
-Use `thinking: {type: "adaptive"}` and `output_config: {effort: ...}`;
-`budget_tokens` is rejected with a 400 on current models. Stream long
-generations. Invoke the `claude-api` skill before writing SDK code rather than
-working from memory — the API surface has drifted.
 
 ## Tuning defaults
 
@@ -147,8 +88,5 @@ independently — most "RAG is broken" reports are retrieval failures.
 
 ## Conventions
 
-Tests come first, and they are written as executable spec: one behaviour per
-test, named as a sentence, with a docstring only where the *why* isn't obvious
-from the name. `tests/conftest.py` provides a `make_client(**setting_overrides)`
-factory that patches `build_resources` with stand-ins, so no test loads a real
-ONNX model.
+Tests come first — write the spec, then the implementation. How they are
+written is in `tests/CLAUDE.md`.

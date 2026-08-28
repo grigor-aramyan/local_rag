@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -74,6 +75,24 @@ class TestBuildResources:
 
         assert settings.lancedb_path.is_dir()
         assert settings.documents_path.is_dir()
+
+    def test_points_tmpdir_at_a_directory_inside_lancedb_path(
+        self, spies, settings, monkeypatch
+    ) -> None:
+        """LanceDB stages the FTS index under the system temp dir and renames it into
+        place; if TMPDIR lands on a different filesystem than lancedb_path (a
+        docker-managed volume vs. the container's overlay root, say) that rename is
+        cross-device and `create_fts_index` raises os error 18. Nesting TMPDIR inside
+        lancedb_path keeps the rename on one filesystem regardless of how the
+        container is run.
+        """
+        monkeypatch.delenv("TMPDIR", raising=False)
+
+        build_resources(settings)
+
+        tmpdir = Path(os.environ["TMPDIR"])
+        assert tmpdir.is_dir()
+        assert tmpdir.resolve().is_relative_to(settings.lancedb_path.resolve())
 
     def test_returns_a_ready_bundle_with_a_job_store(self, spies, settings) -> None:
         resources = build_resources(settings)

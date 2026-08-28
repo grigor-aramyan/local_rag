@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -53,6 +54,17 @@ def build_resources(settings: Settings) -> Resources:
 
     settings.lancedb_path.mkdir(parents=True, exist_ok=True)
     settings.documents_path.mkdir(parents=True, exist_ok=True)
+
+    # LanceDB stages the FTS index under the system temp dir and renames it into
+    # place; if TMPDIR lands on a different filesystem than lancedb_path (a
+    # docker-managed volume vs. the container's overlay root, say) that rename is
+    # cross-device and `create_fts_index` raises `RuntimeError: ... Invalid
+    # cross-device link (os error 18)`. Nesting TMPDIR inside lancedb_path keeps
+    # every stage-then-rename on the same filesystem no matter how the container
+    # is deployed.
+    tmp_dir = settings.lancedb_path / ".tmp"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    os.environ["TMPDIR"] = str(tmp_dir)
 
     load_options = {
         "cache_dir": str(settings.model_cache_path),

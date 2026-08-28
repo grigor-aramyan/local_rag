@@ -103,8 +103,11 @@ into the LanceDB directory; if `/tmp` and the data volume are on different
 filesystems, that move is a cross-device rename and `table.create_fts_index`
 raises `RuntimeError: ... Invalid cross-device link (os error 18)` —
 reproduced in this sandbox, where a docker-managed volume can land on a
-different device than the container's overlay root. Point `TMPDIR` at a
-directory on the same filesystem as `lancedb_path` if ingestion hits this.
+different device than the container's overlay root. `build_resources`
+(`registry.py`) heads this off at startup by pointing `TMPDIR` at
+`lancedb_path/.tmp`, so every stage-then-rename stays on the volume regardless
+of how the container is deployed — this must run before anything opens the
+database or writes to it, and before any other code path claims `TMPDIR`.
 
 **API notes** (lancedb 0.24.0): `db.table_names()` silently defaults to
 `limit=10`; a missing table raises a plain `ValueError`; and `merge_insert`

@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     top_k: int = Field(default=50, gt=0)
     rerank_top_n: int = Field(default=5, gt=0)
     ann_index_threshold: int = Field(default=100_000, gt=0)
+    # Toggleable per the brief: measure whether reranking helps before treating it
+    # as mandatory in the hot path.
+    rerank_enabled: bool = True
 
     # Generation — the Anthropic API. Only generation is remote; embedding and
     # reranking stay local so the corpus never leaves the container.

@@ -24,6 +24,10 @@ class Resources:
     db: Any | None = None
     jobs: JobStore | None = None
     tokenizer: Any | None = None
+    # Only generation calls this; unlike the other components it is never checked
+    # by `ready` — a missing or bad key is a per-request auth failure at Anthropic,
+    # not a reason to refuse serving retrieval.
+    llm_client: Any | None = None
     # Set when the index on disk was built under incompatible settings. Held
     # rather than raised so `/health` can explain the refusal instead of the
     # container crash-looping with the reason buried in its logs.
@@ -42,6 +46,7 @@ def build_resources(settings: Settings) -> Resources:
     Imports are local so the module stays importable (and unit-testable) without
     paying the ONNX import cost.
     """
+    import anthropic
     import lancedb
     from fastembed import TextEmbedding
     from fastembed.rerank.cross_encoder import TextCrossEncoder
@@ -63,12 +68,22 @@ def build_resources(settings: Settings) -> Resources:
     logger.info("opening lancedb at %s", settings.lancedb_path)
     db = lancedb.connect(str(settings.lancedb_path))
 
+    # Construction alone never touches the network or validates the key — a
+    # missing/bad key only surfaces when a query actually calls the API.
+    llm_client = anthropic.Anthropic(
+        api_key=settings.anthropic_api_key.get_secret_value()
+        if settings.anthropic_api_key
+        else None,
+        base_url=settings.anthropic_base_url,
+    )
+
     return Resources(
         embedder=embedder,
         reranker=reranker,
         db=db,
         jobs=JobStore(settings.jobs_db_path),
         tokenizer=tokenizer_for(embedder),
+        llm_client=llm_client,
     )
 
 

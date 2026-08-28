@@ -140,6 +140,34 @@ def replace_document(table: Any, source: str, rows: Sequence[dict[str, Any]]) ->
     )
 
 
+def hybrid_search(
+    table: Any, query_vector: Sequence[float], query_text: str, limit: int
+) -> list[dict[str, Any]]:
+    """Vector + FTS retrieval, combined by LanceDB's reciprocal-rank-fusion reranker.
+
+    The vector is passed in explicitly rather than as a bare string query: LanceDB
+    would otherwise look up a registered embedding function for the column, and
+    this table has none — embedding happens once, upstream, through the same
+    fastembed model the index was built with.
+
+    Returns `[]` for a table nothing has been ingested into yet. Hybrid search
+    raises once there is no FTS index, and the FTS index is only built after
+    ingestion writes rows — so an empty table is the one case this must not let
+    through as an error.
+    """
+    if table.count_rows() == 0:
+        return []
+
+    return (
+        table.search(query_type="hybrid")
+        .vector(list(query_vector))
+        .text(query_text)
+        .limit(limit)
+        .select(["id", "text", "source", "page", "content_hash"])
+        .to_list()
+    )
+
+
 def ensure_fts_index(table: Any) -> bool:
     """(Re)build the full-text index the hybrid retriever needs.
 

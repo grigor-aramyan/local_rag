@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
@@ -15,6 +15,7 @@ from app.services.vectorstore import (
     config_fingerprint,
     ensure_ann_index,
     ensure_fts_index,
+    hybrid_search,
     open_chunks_table,
     record_config,
     rows_from_chunks,
@@ -37,6 +38,16 @@ def make_chunk(source: str = "a.md", ordinal: int = 0, text: str = "hello") -> C
 def write_document(table, source: str, texts: list[str], dim: int = 4) -> None:
     chunks = [make_chunk(source, i, text) for i, text in enumerate(texts)]
     vectors = [[float(i)] * dim for i in range(len(chunks))]
+    table_rows = rows_from_chunks(chunks, vectors)
+    from app.services.vectorstore import replace_document
+
+    replace_document(table, source, table_rows)
+
+
+def write_document_with_vectors(table, source: str, items: list[tuple[str, list[float]]]) -> None:
+    """Like `write_document`, but with an explicit vector per chunk for similarity tests."""
+    chunks = [make_chunk(source, i, text) for i, (text, _) in enumerate(items)]
+    vectors = [vector for _, vector in items]
     table_rows = rows_from_chunks(chunks, vectors)
     from app.services.vectorstore import replace_document
 
@@ -258,6 +269,83 @@ class TestIndexes:
         compact(table)
 
         assert table.count_rows() == 2
+
+
+class TestHybridSearch:
+    QUERY_VECTOR: ClassVar[list[float]] = [1.0, 0.0, 0.0, 0.0]
+
+    def test_an_empty_table_returns_no_candidates(self, table: Any) -> None:
+        """Hybrid search raises without an FTS index; an empty table has none yet."""
+        assert hybrid_search(table, self.QUERY_VECTOR, "cats", limit=10) == []
+
+    def test_a_vector_only_match_is_still_returned(self, table: Any) -> None:
+        """No lexical overlap with the query text, but the nearest vector."""
+        write_document_with_vectors(
+            table, "vector_only.md", [("zzz filler content", [1.0, 0.0, 0.0, 0.0])]
+        )
+        write_document_with_vectors(
+            table, "unrelated.md", [("more filler text", [0.0, 1.0, 0.0, 0.0])]
+        )
+        ensure_fts_index(table)
+
+        results = hybrid_search(table, self.QUERY_VECTOR, "cats", limit=10)
+
+        assert "vector_only.md" in {r["source"] for r in results}
+
+    def test_a_lexical_only_match_is_still_returned(self, table: Any) -> None:
+        """Vector far from the query, but the text matches "cats" directly."""
+        write_document_with_vectors(
+            table, "lexical_only.md", [("cats are wonderful", [0.0, 0.0, 0.0, 1.0])]
+        )
+        write_document_with_vectors(
+            table, "unrelated.md", [("more filler text", [0.0, 1.0, 0.0, 0.0])]
+        )
+        ensure_fts_index(table)
+
+        results = hybrid_search(table, self.QUERY_VECTOR, "cats", limit=10)
+
+        assert "lexical_only.md" in {r["source"] for r in results}
+
+    def test_results_carry_the_fields_a_citation_needs(self, table: Any) -> None:
+        write_document_with_vectors(table, "a.md", [("cats are small animals", self.QUERY_VECTOR)])
+        ensure_fts_index(table)
+
+        results = hybrid_search(table, self.QUERY_VECTOR, "cats", limit=10)
+
+        assert results[0]["text"] == "cats are small animals"
+        assert results[0]["source"] == "a.md"
+        assert "page" in results[0]
+        assert "content_hash" in results[0]
+        assert "vector" not in results[0]
+
+    def test_a_document_matching_both_signals_ranks_first(self, table: Any) -> None:
+        write_document_with_vectors(
+            table, "close.md", [("cats are small animals", self.QUERY_VECTOR)]
+        )
+        write_document_with_vectors(
+            table, "far.md", [("the stock market rose today", [0.0, 1.0, 0.0, 0.0])]
+        )
+        ensure_fts_index(table)
+
+        results = hybrid_search(table, self.QUERY_VECTOR, "cats", limit=10)
+
+        assert results[0]["source"] == "close.md"
+
+    def test_the_limit_caps_the_number_of_candidates(self, table: Any) -> None:
+        write_document_with_vectors(
+            table,
+            "a.md",
+            [
+                ("cats", [1.0, 0.0, 0.0, 0.0]),
+                ("dogs", [0.9, 0.1, 0.0, 0.0]),
+                ("birds", [0.8, 0.2, 0.0, 0.0]),
+            ],
+        )
+        ensure_fts_index(table)
+
+        results = hybrid_search(table, self.QUERY_VECTOR, "animals", limit=1)
+
+        assert len(results) == 1
 
 
 class TestConfigGuard:

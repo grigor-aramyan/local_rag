@@ -31,6 +31,7 @@ class TestBuildResources:
 
     @pytest.fixture
     def spies(self, monkeypatch, word_tokenizer) -> dict[str, dict]:
+        import anthropic
         import fastembed
         import fastembed.rerank.cross_encoder as cross_encoder
         import lancedb
@@ -45,9 +46,14 @@ class TestBuildResources:
 
             return _spy
 
+        def record_anthropic(**kwargs):
+            calls["llm_client"] = kwargs
+            return object()
+
         monkeypatch.setattr(fastembed, "TextEmbedding", record("embedder"))
         monkeypatch.setattr(cross_encoder, "TextCrossEncoder", record("reranker"))
         monkeypatch.setattr(lancedb, "connect", record("db"))
+        monkeypatch.setattr(anthropic, "Anthropic", record_anthropic)
         return calls
 
     def test_loads_models_from_the_baked_cache_without_network(self, spies, settings) -> None:
@@ -79,6 +85,22 @@ class TestBuildResources:
     def test_a_chunking_tokenizer_is_prepared_at_startup(self, spies, settings) -> None:
         """Copying the tokenizer per document would re-parse ~700 KB of JSON each time."""
         assert build_resources(settings).tokenizer is not None
+
+    def test_an_llm_client_is_constructed(self, spies, settings) -> None:
+        assert build_resources(settings).llm_client is not None
+
+    def test_the_api_key_is_unwrapped_from_the_secret(self, spies, make_settings) -> None:
+        settings = make_settings(anthropic_api_key="sk-ant-test-value")
+
+        build_resources(settings)
+
+        assert spies["llm_client"]["api_key"] == "sk-ant-test-value"
+
+    def test_a_missing_api_key_does_not_fail_startup(self, spies, settings) -> None:
+        """A missing key is a per-query auth failure at Anthropic, not a startup one."""
+        build_resources(settings)
+
+        assert spies["llm_client"]["api_key"] is None
 
 
 class TestTokenizerFor:

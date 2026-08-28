@@ -59,3 +59,7 @@ class Citation(BaseModel):
 class QueryResponse(BaseModel):
     answer: str
     citations: list[Citation] = Field(default_factory=list)
+    warning: str | None = Field(
+        default=None,
+        description="Set when nothing relevant was retrieved; falls back to model knowledge",
+    )

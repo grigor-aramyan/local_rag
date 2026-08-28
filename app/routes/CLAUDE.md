@@ -24,10 +24,21 @@ always belongs to the current process.
 
 ## POST /query
 
-Currently returns 501 (build step 10). The pipeline it will front is embed →
-hybrid retrieve (vector + FTS) `top_k≈50` → rerank to ~5 → numbered context
-blocks → stream from Claude. Retrieval and generation details are in
-`app/services/CLAUDE.md`.
+Build step 10. Embed → hybrid retrieve (vector + FTS) `top_k` → rerank to
+`rerank_top_n` (toggleable via `rerank_enabled`) → generate, grounded via native
+Anthropic citations rather than prompted `[n]` markers. Retrieval and
+generation details are in `app/services/CLAUDE.md`.
+
+Nothing relevant retrieved is not an error (brief decision #12): the response
+still comes back 200, generated from the model's own knowledge, with
+`QueryResponse.warning` set so the caller can tell the two cases apart.
+
+The handler maps generation failures to HTTP status rather than letting them
+surface as bare 500s: `anthropic.RateLimitError` → 429,
+`APIConnectionError`/`APIStatusError` → 502. A missing Anthropic credential is a
+special case — the SDK (`anthropic==1.1.0`) raises a bare `TypeError` for it,
+not a typed exception, matched by message and turned into a 503; any other
+`TypeError` is re-raised rather than swallowed as a config error.
 
 ## GET /health
 

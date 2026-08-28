@@ -16,6 +16,7 @@ def test_defaults_match_the_brief() -> None:
     assert settings.embedding_model == "BAAI/bge-small-en-v1.5"
     assert settings.embedding_dim == 384
     assert settings.llm_model == "claude-opus-5"
+    assert settings.rerank_enabled is True
 
 
 def test_overlap_must_be_smaller_than_chunk_size() -> None:
@@ -53,3 +54,9 @@ def test_api_key_is_not_exposed_by_repr(monkeypatch) -> None:
 def test_sizes_must_be_positive(field: str, value: int) -> None:
     with pytest.raises(ValidationError):
         Settings(**{field: value})
+
+
+def test_reranking_can_be_disabled_from_the_environment(monkeypatch) -> None:
+    monkeypatch.setenv("RERANK_ENABLED", "false")
+
+    assert Settings().rerank_enabled is False

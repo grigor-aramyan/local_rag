@@ -10,9 +10,13 @@ open-questions section whose answers are not recorded anywhere. If a decision
 from that section is needed, ask rather than assume.
 
 Built: config, upload handling, the SQLite job store, `/health`, the route
-surface, the ingestion pipeline (steps 7–9), and the config-compatibility guard
-(step 6). Stubbed: `POST /query` (step 10, returns 501). An upload is stored,
-indexed, and searchable by both vector and FTS — but nothing queries it yet.
+surface, the ingestion pipeline (steps 7–9), the config-compatibility guard
+(step 6), and the query pipeline (step 10) — `POST /query` embeds the question,
+hybrid-retrieves, optionally reranks, and generates a grounded answer via native
+Anthropic citations. Not yet built: citation streaming to the client (the
+Anthropic call streams internally for timeout safety, but the HTTP response is
+still one JSON object), the eval harness (step 13), and `sample_docs/` /
+demo ingest (step 12).
 
 ## Where the rest lives
 

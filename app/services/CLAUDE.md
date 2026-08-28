@@ -51,8 +51,28 @@ model's context length (512 for bge-small) — see trap 4.
 
 ## Query pipeline
 
-Embed → hybrid retrieve (vector + FTS) `top_k≈50` → rerank to ~5 → numbered
-context blocks → stream from Claude.
+`app/services/query.py`: embed the question → `vectorstore.hybrid_search`
+(vector + FTS, combined by LanceDB's own RRF reranker, `top_k` candidates) →
+optionally rerank with the local cross-encoder to `rerank_top_n`
+(`settings.rerank_enabled`; disabled, the hybrid ranking is trusted as-is) →
+`generation.generate_answer`. An empty table doesn't raise — `hybrid_search`
+checks `count_rows() == 0` first, since LanceDB raises once there is no FTS
+index, and the index only exists after ingestion writes rows.
+
+`app/services/generation.py`: each reranked chunk becomes a `document` content
+block with `citations: {enabled: true}` and a plain `text/plain` source — the
+brief's preferred approach over prompted `[n]` markers. The call goes through
+`client.messages.stream(...)` + `get_final_message()` so a slow generation
+can't hit the SDK's non-streaming timeout guard, but the query endpoint's
+response is still one JSON object, not a stream, to the HTTP caller. Citations
+come back keyed by `document_index` (one per chunk, in request order); markers
+are assigned by first-appearance order of `(source, page)`, so the same chunk
+cited twice keeps its marker rather than getting a new one.
+
+With zero retrieved chunks, no `document` blocks are sent and the model
+answers from its own knowledge under a different system prompt — the route
+attaches `QueryResponse.warning` in that case, per the brief's decision to
+answer with a warning rather than refuse (decision #12).
 
 ## LanceDB
 
@@ -77,6 +97,14 @@ full rebuild. Skip the ANN index below ~100k vectors (brute force is faster
 there); create IVF-PQ above `ann_index_threshold`, with `num_partitions` capped
 at the row count — IVF training fails outright when asked to cluster more
 partitions than it has vectors.
+
+Building the FTS index stages files under the system temp dir and moves them
+into the LanceDB directory; if `/tmp` and the data volume are on different
+filesystems, that move is a cross-device rename and `table.create_fts_index`
+raises `RuntimeError: ... Invalid cross-device link (os error 18)` —
+reproduced in this sandbox, where a docker-managed volume can land on a
+different device than the container's overlay root. Point `TMPDIR` at a
+directory on the same filesystem as `lancedb_path` if ingestion hits this.
 
 **API notes** (lancedb 0.24.0): `db.table_names()` silently defaults to
 `limit=10`; a missing table raises a plain `ValueError`; and `merge_insert`

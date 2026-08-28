@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -68,6 +69,89 @@ class FakeEmbedder:
 @pytest.fixture
 def fake_embedder() -> FakeEmbedder:
     return FakeEmbedder()
+
+
+class FakeReranker:
+    """Deterministic stand-in for `TextCrossEncoder.rerank` — higher score is more relevant."""
+
+    def __init__(self, scores: dict[str, float] | None = None) -> None:
+        self._scores = scores or {}
+        self.calls: list[tuple[str, list[str]]] = []
+
+    def rerank(
+        self, query: str, documents: Sequence[str], batch_size: int = 64, **kwargs: Any
+    ) -> list[float]:
+        docs = list(documents)
+        self.calls.append((query, docs))
+        return [self._scores.get(text, float(len(text))) for text in docs]
+
+
+@pytest.fixture
+def fake_reranker() -> FakeReranker:
+    return FakeReranker()
+
+
+class _FakeMessageStream:
+    def __init__(self, message: Any) -> None:
+        self._message = message
+
+    def __enter__(self) -> _FakeMessageStream:
+        return self
+
+    def __exit__(self, *exc_info: Any) -> None:
+        return None
+
+    def get_final_message(self) -> Any:
+        return self._message
+
+
+class FakeAnthropicClient:
+    """Stand-in for `anthropic.Anthropic` — records requests, returns a canned message.
+
+    `message` can be a single `Message`-like object reused for every call, or a
+    list consumed one per call (for tests that need different answers for the
+    with-context and no-context generation paths).
+    """
+
+    def __init__(self, message: Any) -> None:
+        self._messages = message if isinstance(message, list) else None
+        self._message = None if self._messages is not None else message
+        self.calls: list[dict[str, Any]] = []
+        self.messages = self
+
+    def stream(self, **kwargs: Any) -> _FakeMessageStream:
+        self.calls.append(kwargs)
+        if self._messages is not None:
+            return _FakeMessageStream(self._messages[len(self.calls) - 1])
+        return _FakeMessageStream(self._message)
+
+
+def text_block(text: str, citations: list[Any] | None = None) -> SimpleNamespace:
+    return SimpleNamespace(type="text", text=text, citations=citations)
+
+
+def char_citation(document_index: int) -> SimpleNamespace:
+    return SimpleNamespace(type="char_location", document_index=document_index)
+
+
+def fake_message(*blocks: Any) -> SimpleNamespace:
+    return SimpleNamespace(content=list(blocks))
+
+
+@pytest.fixture
+def make_fake_message() -> Callable[..., SimpleNamespace]:
+    """Factory for a stand-in `anthropic.types.Message` — only `.content` is read."""
+    return fake_message
+
+
+@pytest.fixture
+def make_text_block() -> Callable[..., SimpleNamespace]:
+    return text_block
+
+
+@pytest.fixture
+def make_citation() -> Callable[..., SimpleNamespace]:
+    return char_citation
 
 
 @pytest.fixture
